@@ -1,5 +1,5 @@
 # signal-cli-python-api
-Python library to interact with signal-cli, a commanline client for Signal Messenger. The library supports programmatic sending/receiving of messages and attachments to direct recipients and group chats.
+Python library to interact with signal-cli, a commanline client for Signal Messenger. The library supports programmatic sending/receiving of messages and attachments to direct recipients and group chats. Suitable for making Signal Messenger bots.
 
 signal-cli is a java application implementing the official Signal Messenger java library, and can be found here:
 https://github.com/AsamK/signal-cli
@@ -7,7 +7,11 @@ https://github.com/AsamK/signal-cli
 HOWEVER: This python library currently requires a forked version of this client that has the "jsonevtloop" function, and that is available here:
 https://github.com/kbin76/signal-cli
 
-## Typical usage
+For the example to work, you must first use the signal-cli command line client to either register a new identity or link it to an already existing identity.
+
+The example below is not complete, and it does not actually do any logging although it says it does in it's replies.
+
+## EXAMPLE
 
 ```python
 
