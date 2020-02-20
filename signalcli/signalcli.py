@@ -10,7 +10,26 @@ class Signalcli:
 
 
     class Message:
-        """ Object that represents an incoming/sent message """
+        """ 
+        Object that represents an incoming/sent message
+        This object is not supposed to be created manually,
+        it's created automatically and sent to the on('message') callback.
+
+        Attributes
+            type                incoming_message|sent_message
+            timestamp           Timestamp of message in epoch ms format
+            timestamp_iso8601   Timestamp of message in IS8601 format
+            sender_identity     Identity of sender (phone-number)
+            sender_device       Identity of sender device (integer)
+            sender_contact      Sender Contact object (if present in contact list)
+            recipient_identity  Identity of recipient (phone-number or groupId or "__MYSELF__")
+            recipient_group     Recipient Group object (if sent to group chat and that group is present in the group list)
+            recipient_contact   Recipient Contact objet (if direct user-to-user message and present in contact list)
+            recipient_type      direct|group
+            message_body        The message text itself
+            attachments         List of attachments
+
+        """
 
 
         class MessageParsingFailure(Exception):
@@ -18,8 +37,7 @@ class Signalcli:
 
 
         @staticmethod
-        def epochms_to_iso8601(ms):
-            #return datetime.datetime.fromtimestamp((ms / 1000.0), tz=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+        def __epochms_to_iso8601(ms):
             return datetime.datetime.fromtimestamp((ms / 1000.0)).strftime('%Y-%m-%dT%H:%M:%S.%f')
 
 
@@ -43,7 +61,7 @@ class Signalcli:
             self.__group_list = group_list
             self.__contact_list = contact_list
             self.timestamp = envelope['timestamp']
-            self.timestamp_iso8601 = Signalcli.Message.epochms_to_iso8601(self.timestamp)
+            self.timestamp_iso8601 = Signalcli.Message.__epochms_to_iso8601(self.timestamp)
             self.sender_identity = envelope['source']
             self.sender_device = envelope['sourceDevice']
             if contact_list and self.sender_identity in contact_list:
@@ -93,7 +111,16 @@ class Signalcli:
 
 
     class Contact:
-        """ Object that represents a Contact record """
+        """ 
+        Object that represents a Contact record from the synced Signal Address Book
+
+        Attributes
+            name            Name of contact
+            identity        Identity (typically phone-number in intl. format)
+            color           Color (name of the color)
+            profile_key     Identity of the user's profile (currently not used)
+            blocked         Wether the user is blocked or not
+        """
 
         def __str__(self):
             return self.name + " (" + self.identity + ")"
@@ -114,7 +141,18 @@ class Signalcli:
 
 
     class Group:
-        """ Object that represents Group Chat """
+        """ 
+        Object that represents a Group chat
+
+        Attributes
+            name            Name of the group chat
+            identity        Identity of the chat (groupId)
+            color           Color (name of the color)
+            blocked         Wether the group is blocked
+            active          Wether the group is active
+            members         List of Contact objects of members
+            members_id_list List of all member identities (phone-numbers)
+        """
 
         def __str__(self):
             self.__member_resolve_contacts()
@@ -205,6 +243,13 @@ class Signalcli:
 
 
     def reply( self, original_message, message_body, attachments = [], reply_to_sent_messages=False):
+        """ Reply to a message
+        Parameters
+            original_message            Message object we want to reply to
+            message_body                Text to reply with
+            attachments                 List of attachments to send with the reply
+            reply_to_sent_messages      Wether to reply also to sent_messages (our own messages) or just someone elses messages
+        """ 
         if original_message.type == "incoming_message" or (reply_to_sent_messages and original_message.type == "sent_message"):
             if original_message.recipient_type == "group":
                 self.send_message(original_message.recipient_identity, message_body, recipient_type="group", attachments=attachments)
@@ -216,6 +261,14 @@ class Signalcli:
 
 
     def send_message( self, recipient_identity, message_body, recipient_type="direct", attachments = []):
+        """ Send a message
+
+        Parameters
+            recipient_type              direct|group
+            recipient_identity          If recipient is group, this is the groupId, if it's direct message, the recipients phone-number
+            message_body                The text message to send
+            attachments                 List of filenames to attach to the message
+        """
         attachmentsList = []
         for a in attachments:
             attachmentsList.appen({ 'filename': a})
@@ -332,7 +385,6 @@ class Signalcli:
         self.async_loop.create_task(self.__stderr_stream_reader())
         if self.alive_check:
             self.signalcli_api_ping_task = self.async_loop.create_task(self.__signalcli_api_ping())
-        #self.async_loop.create_task(self.__request_groups_and_contacts())
 
 
     def __call_event_callback( self, event_name, event_obj):
@@ -344,11 +396,18 @@ class Signalcli:
 
     def on( self, event_name, callback, *callback_data):
         """ Add event subscriber callback and optional callback_data arguments that will be passed to the called callback function
-            Signature of the callback function should be:
+
+            Signature of the callback function:
                 callback(sigcli_object, event_name, event_object[, <callback_data arguments,...>])
-            Return: callback_record object that can later be used to remove the callback.
+
+            Return: 
+                callback_record object that can later be used to remove the callback.
+
+            Events:
+                message         On incoming messages
+                error           On errors (currently not implemented!)
         """
-        if event_name in ['message','error','sent']:
+        if event_name in ['message','error']:
             if not event_name in self.callbacks:
                 self.callbacks[event_name] = []
             new_callback_record = { 'callback': callback, 'callback_data': callback_data }
@@ -374,7 +433,7 @@ class Signalcli:
 
 
     def run(self):
-        """ Starts the asyncio event loop with run_forever() """
+        """ Starts the asyncio event loop with run_forever(), mandatory to call when all is setup to get the application working """
         self.async_loop.run_forever()
 
 
