@@ -4,7 +4,7 @@ Python library to interact with signal-cli, a commanline client for Signal Messe
 signal-cli is a java application implementing the official Signal Messenger java library, and can be found here:
 https://github.com/AsamK/signal-cli
 
-HOWEVER: This python library currently requires a forked version of this client that has the "jsonevtloop" function, and that is available here:
+HOWEVER: This python library currently requires a forked version of this client that has the "jsonEventLoop" functionality, and that is available here:
 https://github.com/kbin76/signal-cli
 
 For the example to work, you must first use the signal-cli command line client to either register a new identity or link it to an already existing identity.
@@ -50,4 +50,9 @@ sig.run()
 
 
 ```
+
+## TODO
+
+Create documentation for the library
+
 
