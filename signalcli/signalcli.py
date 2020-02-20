@@ -1,5 +1,6 @@
 
 import sys
+import os
 import asyncio
 import json
 import time
@@ -11,33 +12,46 @@ class Signalcli:
     class Message:
         """ Object that represents an incoming/sent message """
 
+
         class MessageParsingFailure(Exception):
             pass
+
 
         @staticmethod
         def epochms_to_iso8601(ms):
             #return datetime.datetime.fromtimestamp((ms / 1000.0), tz=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f%z')
             return datetime.datetime.fromtimestamp((ms / 1000.0)).strftime('%Y-%m-%dT%H:%M:%S.%f')
 
-        def __str__(self):
-            if self.recipient_type == "group" and self.__group_list and self.recipient_identity in self.__group_list:
-                additional_recipient_info = "   Group: " + str(self.__group_list[self.recipient_identity]) + "\n"
-            elif self.recipient_type == "direct" and self.__contact_list and self.recipient_identity in self.__contact_list:
-                additional_recipient_info = "   Contact: " + str(self.__contact_list[self.recipient_identity]) + "\n"              
-            else:
-                additional_recipient_info = ""
-            return "Message (" + self.type +") From: " + self.sender_identity + "/" + str(self.sender_device) + " [" + self.timestamp_iso8601 + "]\n" +\
-                "   Recipient: " + self.recipient_identity + " (" + self.recipient_type + ")\n" +\
-                additional_recipient_info +\
-                "   Message: " + self.message_body
 
-        def __init__(self, envelope, group_list=None, contact_list=None):
+        def __str__(self):
+            s = "Message (" + self.type +") From: " + self.sender_identity + "/" + str(self.sender_device) + " [" + self.timestamp_iso8601 + "]\n"
+            if self.sender_contact:
+                s += "    Sender: " + str(self.sender_contact) + "\n"
+            if self.recipient_contact:
+                s += "    Recipient: " + str(self.__contact_list[self.recipient_identity]) + "\n"
+            else:
+                s += "    Recipient: " + self.recipient_identity + " (" + self.recipient_type + ")\n"
+            if self.recipient_group:
+                s += "    Group: " + str(self.recipient_group) + "\n"
+            for a in self.attachments:
+                s += " Attachment: Filename='" + str(a['filename']) + "', contentType='" + str(a['contentType']) + "', storagePath='" + str(a['storagePath']) + "'\n"
+            s += "    Message: " + self.message_body            
+            return s
+
+
+        def __init__(self, envelope, group_list=None, contact_list=None, attachmentsPath=None):
             self.__group_list = group_list
             self.__contact_list = contact_list
             self.timestamp = envelope['timestamp']
             self.timestamp_iso8601 = Signalcli.Message.epochms_to_iso8601(self.timestamp)
             self.sender_identity = envelope['source']
             self.sender_device = envelope['sourceDevice']
+            if contact_list and self.sender_identity in contact_list:
+                self.sender_contact = contact_list[self.sender_identity]
+            else:
+                self.sender_contact = None
+            self.recipient_contact = None
+            self.recipient_group = None
             if envelope['dataMessage']:
                 self.type = "incoming_message"
                 self.message_body = envelope['dataMessage']['message']
@@ -45,9 +59,11 @@ class Signalcli:
                 if envelope['dataMessage']['groupInfo']:
                     self.recipient_type = "group"
                     self.recipient_identity = envelope['dataMessage']['groupInfo']['groupId']
+                    if group_list and self.recipient_identity in group_list:
+                        self.recipient_group = group_list[self.recipient_identity]
                 else:
                     self.recipient_type = "direct"
-                    self.recipient_identity = "Me"
+                    self.recipient_identity = "__MYSELF__"
             elif envelope['syncMessage']:
                 self.type = "sent_message"
                 if envelope['syncMessage']['sentMessage']:
@@ -56,14 +72,24 @@ class Signalcli:
                     if envelope['syncMessage']['sentMessage']['groupInfo']:
                         self.recipient_type = "group"
                         self.recipient_identity = envelope['syncMessage']['sentMessage']['groupInfo']['groupId']
+                        if group_list and self.recipient_identity in group_list:
+                            self.recipient_group = group_list[self.recipient_identity]
                     else:
                         self.recipient_type = "direct"
                         self.recipient_identity = envelope['syncMessage']['sentMessage']['destination']
+                        if contact_list and self.recipient_identity in contact_list:
+                            self.recipient_contact = contact_list[self.recipient_identity]
                 else:
                     raise Signalcli.Message.MessageParsingFailure()
             else:
                 ## unsupported message-type
                 raise Signalcli.Message.MessageParsingFailure()
+
+            ## prepend attachmentsPath to attachment filename
+            if self.attachments and attachmentsPath:
+                for a in self.attachments:
+                    a['storagePath'] = os.path.join(attachmentsPath,a['id'])
+
 
 
     class Contact:
@@ -181,27 +207,36 @@ class Signalcli:
     def reply( self, original_message, message_body, attachments = [], reply_to_sent_messages=False):
         if original_message.type == "incoming_message" or (reply_to_sent_messages and original_message.type == "sent_message"):
             if original_message.recipient_type == "group":
-                self.send_message( "group", original_message.recipient_identity, message_body, attachments=attachments)
+                self.send_message(original_message.recipient_identity, message_body, recipient_type="group", attachments=attachments)
             elif original_message.recipient_type == "direct":
                 if original_message.type == "sent_message":
-                    self.send_message( "direct", original_message.recipient_identity, message_body, attachments=attachments)
+                    self.send_message(original_message.recipient_identity, message_body, recipient_type="direct", attachments=attachments)
                 else:
-                    self.send_message( "direct", original_message.sender_identity, message_body, attachments=attachments)
+                    self.send_message(original_message.sender_identity, message_body, recipient_type="direct", attachments=attachments)
 
 
-    def send_message( self, recipient_type, recipient_identity, message_body, attachments = []):
+    def send_message( self, recipient_identity, message_body, recipient_type="direct", attachments = []):
+        attachmentsList = []
+        for a in attachments:
+            attachmentsList.appen({ 'filename': a})
         req = {
             "reqID": self.__get_reqID(),
             "reqType": "send_message",
-            "messageBody": message_body
+            "dataMessage": {
+                "message": message_body,
+                "attachments": attachmentsList
+            }
         }
         if recipient_type == "group":
-            req['recipientGroupID'] = recipient_identity
+            req['dataMessage']['groupInfo'] = {
+                "groupId": recipient_identity
+            }
         elif recipient_type == "direct":
-            req['recipientNumber'] = recipient_identity
+            req['recipient'] = {
+                "number": recipient_identity
+            }
         else:
             raise Signalcli.SignalcliSendError('recipient_type must be either "group" or "direct"')
-        #await self.__send_json(req)
         self.outgoing_json_queue.put_nowait(req)
 
 
@@ -223,27 +258,31 @@ class Signalcli:
     async def __incoming_json_queue_worker(self):
         while True:
             data_object = await self.incoming_json_queue.get()
-            if data_object['apiVer'] == 2:
-                respType = data_object['respType']
-                if respType == "alive":
-                    self.alive_timestamp = time.time()
-                elif respType == "envelope":
-                    if data_object['envelope']['dataMessage'] or data_object['envelope']['syncMessage']:
-                        try:
-                            m = Signalcli.Message( data_object['envelope'], contact_list = self.contact_list, group_list = self.group_list)
-                            self.__call_event_callback( 'message', m)
-                        except Signalcli.Message.MessageParsingFailure:
-                            pass
-                elif respType == "group_list":
-                    self.__process_group_list(data_object['data'])
-                elif respType == "contact_list":
-                    self.__process_contact_list(data_object['data'])
-                elif respType == "send_message":
-                    pass
-                else:
-                    self.__error_out( 'Signalcli::incoming_json_queue_worker: Unknown respType="{0}"'.format(respType))
+            respType = data_object['respType']
+            self.alive_timestamp = time.time()
+            if respType == "alive":
+                pass
+            elif respType == "metadata":
+                if data_object['apiVer'] != 2:
+                    self.__error_exit( "Signalcli::__incoming_json_queue_worker: Unknown apiVer: '" + data_object['apiVer'] + "'")
+                if data_object['attachmentsPath'] != "":
+                    self.attachmentsPath = data_object['attachmentsPath']
+                await self.__request_groups_and_contacts()
+            elif respType == "envelope":
+                if data_object['envelope']['dataMessage'] or data_object['envelope']['syncMessage']:
+                    try:
+                        m = Signalcli.Message( data_object['envelope'], contact_list = self.contact_list, group_list = self.group_list, attachmentsPath = self.attachmentsPath)
+                        self.__call_event_callback( 'message', m)
+                    except Signalcli.Message.MessageParsingFailure:
+                        pass
+            elif respType == "list_groups":
+                self.__process_group_list(data_object['data'])
+            elif respType == "list_contacts":
+                self.__process_contact_list(data_object['data'])
+            elif respType == "send_message":
+                pass
             else:
-                self.__error_out('Signalcli::__incoming_json_queue_worker: Unknown API version ' + str(data_object['apiVer']))
+                self.__error_out( 'Signalcli::incoming_json_queue_worker: Unknown respType="{0}"'.format(respType))
 
 
     async def __stdout_stream_reader(self):
@@ -284,7 +323,7 @@ class Signalcli:
     async def __start_signal_cli_subprocess(self):
         self.signal_cli_proc = await asyncio.create_subprocess_exec(
             self.bin_path,
-            "-u", self.user_name, "jsonevtloop",
+            "-u", self.user_name, "jsonEventLoop",
             stderr=asyncio.subprocess.PIPE,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
@@ -293,7 +332,7 @@ class Signalcli:
         self.async_loop.create_task(self.__stderr_stream_reader())
         if self.alive_check:
             self.signalcli_api_ping_task = self.async_loop.create_task(self.__signalcli_api_ping())
-        self.async_loop.create_task(self.__request_groups_and_contacts())
+        #self.async_loop.create_task(self.__request_groups_and_contacts())
 
 
     def __call_event_callback( self, event_name, event_obj):
@@ -355,6 +394,8 @@ class Signalcli:
         self.debug = debug
         if debug:
             self.debug_io = True
+        else:
+            self.debug_io = False
         if not user_name:
             raise Signalcli.SignalcliUsernameError('user_name not defined')
         self.reqID_counter = 0
@@ -369,5 +410,6 @@ class Signalcli:
         self.async_loop.create_task(self.__incoming_json_queue_worker())
         self.async_loop.create_task(self.__outgoing_json_queue_worker())
         self.callbacks = {}
+        self.attachmentsPath = None
 
 
